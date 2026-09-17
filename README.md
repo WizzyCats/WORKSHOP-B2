@@ -1,241 +1,108 @@
 # WORKSHOP-B2
 
-PARTIE MR LARBIN:
+=========================================================
+                    PARTIE MR LARBIN
+=========================================================
 
-/*
-  =========================================================
-   MR LARBIN - Tamagotchi ESP8266 + TFT 128x160 (ST7735)
-  =========================================================
-  Bibliothèques nécessaires (à installer via le Gestionnaire
-  de bibliothèques de l'IDE Arduino) :
-    - Adafruit GFX Library
-    - Adafruit ST7735 and ST7789 Library
+# Mr Larbin — Tamagotchi ESP8266
 
-  Câblage (d'après ton branchement réel) :
-    Écran GND -> GND
-    Écran VCC -> 3V3
-    Écran RES -> TX  (GPIO1)   -> déplacé depuis D3 : D3=GPIO0 sert au boot de l'ESP8266
-    Écran DC  -> D4  (GPIO2)
-    Écran CS  -> D8  (GPIO15)
-    Écran BLK -> D6  (GPIO12)   -> rétroéclairage (déplacé depuis D5)
-    Écran SCL -> D5  (GPIO14)   -> horloge SPI MATÉRIELLE (déplacé depuis D6)
-    Écran SDA -> D7  (GPIO13)   -> données SPI matérielle (inchangé)
-    (Le SPI logiciel était trop lent pour une image 128x160 : la boucle
-     bloquait trop longtemps sans "yield", ce qui déclenchait un reset
-     watchdog de l'ESP8266 -> image tronquée + flash blanc en boucle.
-     Le SPI matériel de l'ESP8266 est fixé sur D5(SCLK)/D7(MOSI), d'où le
-     besoin de libérer D5 en déplaçant le rétroéclairage sur D6.)
+Tamagotchi maison sur ESP8266 (NodeMCU V3) + écran TFT ST7735 128×160, avec 3 boutons et un buzzer.
 
-    Bouton 1 (MANGER)  -> D0 (GPIO16) -> 3V3  *câblage inversé, voir remarque D0*
-    Bouton 2 (DORMIR)  -> D1 (GPIO5)  -> GND
-    Bouton 3 (TRAVAIL) -> D2 (GPIO4)  -> GND
-    Buzzer (+)         -> RX (GPIO3)
-    Buzzer (-)         -> GND
+## Fichiers du projet
 
-  /!\ Remarque sur le buzzer branché sur RX (GPIO3) :
-    RX sert normalement à la liaison série (USB). Comme ce pin est réutilisé
-    en sortie numérique pour le buzzer, le code n'utilise PAS Serial.begin() /
-    Serial.print() : les deux sont incompatibles en même temps. Si tu as
-    besoin du moniteur série pour déboguer, débranche temporairement le
-    buzzer, ou passe-le sur un autre pin libre (ex. A0 avec un transistor,
-    ou TX/GPIO1).
+- `MrLarbin.ino` — le sketch principal (logique du jeu, écran, boutons, buzzer)
+- `images.h` — les 4 images du personnage, converties en tableaux de pixels RGB565
 
-  /!\ A propos du changement RES : D3 = GPIO0 = pin utilisé par l'ESP8266 pour
-    choisir son mode au démarrage (flash vs exécution normale). Y brancher le
-    reset de l'écran empêchait l'upload automatique (erreur "Timed out waiting
-    for packet header"). RES est donc passé sur TX (GPIO1), libre.
+## Câblage final
 
-  /!\ Remarque importante sur D0 (GPIO16) :
-    Ce pin ne possède PAS de résistance de pull-up interne (contrairement aux
-    autres GPIO de l'ESP8266) — d'où les bips intempestifs si le bouton reste
-    câblé comme les autres. En revanche GPIO16 a un pull-DOWN interne
-    spécifique (INPUT_PULLDOWN_16). Le bouton 1 est donc câblé à l'envers
-    des deux autres : entre D0 et 3V3 (pas GND), et se lit à l'état HAUT
-    quand il est pressé (au lieu de BAS pour les boutons 2 et 3).
+| Composant       | Pin ESP8266 | Remarque |
+|-----------------|-------------|----------|
+| Écran GND       | GND         | |
+| Écran VCC       | 3V3         | |
+| Écran RES       | TX (GPIO1)  | déplacé depuis D3 : D3=GPIO0 sert au boot |
+| Écran DC        | D4 (GPIO2)  | |
+| Écran CS        | D8 (GPIO15) | |
+| Écran BLK       | D6 (GPIO12) | rétroéclairage |
+| Écran SCL       | D5 (GPIO14) | horloge SPI matérielle |
+| Écran SDA       | D7 (GPIO13) | données SPI matérielle |
+| Bouton MANGER   | D0 (GPIO16) | câblé vers **3V3** (pas GND), pull-down interne |
+| Bouton DORMIR   | D1 (GPIO5)  | câblé vers GND, pull-up interne |
+| Bouton TRAVAIL  | D2 (GPIO4)  | câblé vers GND, pull-up interne |
+| Buzzer +        | RX (GPIO3)  | |
+| Buzzer −        | GND         | |
 
-  Adaptez les pins ci-dessous à votre câblage réel si besoin.
-  =========================================================
-*/
+### Pourquoi ce câblage un peu particulier ?
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7735.h>
-#include <SPI.h>
-#include "images.h"   // contient img_dors, img_idle, img_mange, img_travaille
+- **RES sur TX plutôt que D3** : D3 = GPIO0, un pin que l'ESP8266 utilise pour décider s'il démarre en mode programmation ou en mode normal. Y brancher le reset de l'écran empêchait l'upload du code (erreur `Timed out waiting for packet header`).
+- **SCL sur D5, BLK sur D6** : le SPI matériel de l'ESP8266 (rapide) impose son horloge sur D5. En dessin logiciel (n'importe quels pins, mais lent), afficher une image 128×160 prenait trop de temps et déclenchait un reset watchdog (l'écran affichait l'image à moitié, flashait en blanc, recommençait). Passer en SPI matériel a réglé le problème, d'où le besoin de libérer D5.
+- **Bouton MANGER câblé vers 3V3** : GPIO16 (D0) est le seul pin de l'ESP8266 sans pull-up interne — câblé comme les autres (vers GND), il "flotte" et déclenche des appuis fantômes. En revanche GPIO16 dispose d'un pull-down interne spécifique (`INPUT_PULLDOWN_16`), d'où le câblage inversé (le bouton relie D0 à 3V3, et l'appui est détecté à l'état HAUT au lieu de BAS).
+- **Buzzer sur RX** : RX sert normalement à la liaison série USB. Le code n'utilise donc pas `Serial.begin()`/`Serial.print()`, car les deux usages sont incompatibles simultanément.
 
-// ---------- Pins écran ----------
-#define TFT_CS    15   // D8
-#define TFT_RST    1   // TX (déplacé depuis D3/GPIO0 qui bloquait l'upload)
-#define TFT_DC     2   // D4
-#define TFT_BLK   12   // D6 (rétroéclairage, déplacé depuis D5)
-// SCL(D5/GPIO14) et SDA(D7/GPIO13) sont fixés par le SPI matériel de l'ESP8266,
-// pas besoin de les définir : la lib les pilote automatiquement.
+## Procédé de conversion des images
 
-// ---------- Pins boutons ----------
-#define BTN_MANGER  16   // D0 - câblé vers 3V3, pull-down interne (voir remarque ci-dessus)
-#define BTN_DORMIR   5   // D1
-#define BTN_TRAVAIL  4   // D2
+L'écran ST7735 affiche les pixels au format **RGB565** (16 bits par pixel : 5 bits rouge, 6 bits vert, 5 bits bleu), stockés dans un tableau qu'on envoie directement en mémoire flash (`PROGMEM`) pour ne pas consommer la RAM.
 
-// ---------- Pin buzzer ----------
-#define BUZZER_PIN   3   // RX - voir remarque ci-dessus (pas de Serial en même temps)
+Étapes suivies pour convertir tes 4 images PNG (`dors.png`, `idle.png`, `mange.png`, `travaille.png`) :
 
-// Constructeur en SPI matériel (rapide) : cs, dc, rst. MOSI/SCLK sont fixés
-// automatiquement par le hardware de l'ESP8266 (D7/D5).
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+1. **Redimensionnement** : chaque image est redimensionnée puis recadrée au centre pour remplir exactement **128×160 pixels** (la taille de l'écran), en conservant les proportions (pas de déformation — l'excédent est coupé sur les bords).
+2. **Conversion RGB888 → RGB565** : pour chaque pixel, les composantes rouge/vert/bleu classiques (0-255 chacune) sont recompressées sur 16 bits avec la formule :
+   ```
+   rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+   ```
+3. **Écriture en tableau C** : les valeurs sont écrites dans `images.h` sous forme de 4 tableaux `const uint16_t` (un par état), stockés en `PROGMEM` pour rester en mémoire flash et ne pas surcharger la RAM (chaque image = 128×160×2 octets = 40 960 octets, soit ~160 Ko pour les 4 images).
 
-// ---------- États du Tamagotchi ----------
-enum EtatMrLarbin {
-  ETAT_IDLE,
-  ETAT_DORT,
-  ETAT_MANGE,
-  ETAT_TRAVAILLE
-};
+Si tu veux remplacer une image plus tard, il suffit de refaire cette conversion (redimensionnement 128×160 + export RGB565) sur la nouvelle image et de remplacer le tableau correspondant dans `images.h`. Envoie-moi la nouvelle image, je peux régénérer le fichier directement.
 
-EtatMrLarbin etatActuel = ETAT_IDLE;
-EtatMrLarbin dernierEtatAffiche = ETAT_IDLE; // pour ne redessiner que si ça change
+## Fonctions du code (`MrLarbin.ino`)
 
-// ---------- Statistiques (0 à 100) ----------
-int faim    = 80;   // descend avec le temps, remonte quand il mange
-int energie = 80;   // descend avec le temps, remonte quand il dort
-int travail = 0;    // monte quand il travaille (score / argent gagné)
+### `void setup()`
+Exécutée une seule fois au démarrage de la carte. Elle :
+- configure les boutons en entrée (`pinMode`) — avec le mode spécial `INPUT_PULLDOWN_16` pour le bouton MANGER (D0) et `INPUT_PULLUP` pour les deux autres ;
+- configure le buzzer et l'écran en sortie ;
+- allume le rétroéclairage de l'écran ;
+- initialise le bus SPI matériel (`SPI.begin()`) puis l'écran (`tft.initR()`) ;
+- efface l'écran et affiche l'image de l'état de départ (idle) via `afficherEtat()`.
 
-// ---------- Timers ----------
-unsigned long dernierTickStats   = 0;
-const unsigned long INTERVALLE_STATS = 5000;   // décrément des stats toutes les 5s
+### `void loop()`
+Exécutée en boucle continue tant que la carte est allumée. Elle :
+- appelle `lireBoutons()` pour détecter les appuis ;
+- toutes les 5 secondes (`INTERVALLE_STATS`), fait descendre la faim et l'énergie (ou remonter l'énergie si Mr Larbin dort) ;
+- vérifie si une action temporaire (manger/travailler) est terminée, et repasse en idle si oui ;
+- endort automatiquement Mr Larbin si son énergie tombe à 0 ;
+- le réveille automatiquement si l'énergie est remontée à 100 (sauf si l'endormissement a été demandé manuellement au bouton DORMIR) ;
+- appelle `afficherEtat()` pour rafraîchir l'écran si l'état a changé ;
+- termine par un `delay(20)` pour ne pas surcharger le processeur.
 
-unsigned long debutActionTemporaire = 0;
-const unsigned long DUREE_MANGE    = 4000;     // 4s de mange
-const unsigned long DUREE_TRAVAIL  = 4000;     // 4s de travail
-bool actionEnCours = false;
+### `void lireBoutons(unsigned long maintenant)`
+Lit l'état des 3 boutons (avec un anti-rebond de 200 ms via `DEBOUNCE`) et déclenche l'action correspondante :
+- **MANGER** (actif à l'état HAUT, câblage inversé) → passe en état "mange", fait un bip, augmente la faim de 30 ;
+- **DORMIR** (actif à l'état BAS) → bascule entre "dort" et "idle" (permet de forcer le sommeil ou de réveiller manuellement) ;
+- **TRAVAIL** (actif à l'état BAS) → passe en état "travaille", fait un bip, augmente le score de travail de 10.
 
-// anti-rebond simple
-unsigned long dernierAppuiBouton = 0;
-const unsigned long DEBOUNCE = 200;
+Un seul bouton est traité par appel (structure `if / else if`), pour éviter les conflits si plusieurs sont pressés en même temps.
 
-// Indique si l'utilisateur a demandé le sommeil manuellement (bouton),
-// pour ne pas le réveiller automatiquement dans ce cas.
-bool dormirManuel = false;
+### `void beep()`
+Émet un bip de 80 ms à 2000 Hz sur le buzzer via la fonction native `tone()` (non bloquante, pilotée par un timer matériel — elle ne ralentit pas la boucle principale). Appelée à chaque pression de bouton dans `lireBoutons()`.
 
-void setup() {
-  // Pas de Serial.begin() ici : RX (GPIO3) est réutilisé pour le buzzer (voir en-tête).
+### `void afficherEtat(EtatMrLarbin etat, bool forcer)`
+Affiche à l'écran l'image correspondant à l'état donné (idle/dort/mange/travaille), en évitant de redessiner si l'état n'a pas changé depuis le dernier appel (paramètre `dernierEtatAffiche`), sauf si `forcer` vaut `true` (utilisé une seule fois au démarrage). Utilise `tft.drawRGBBitmap()` pour envoyer directement le tableau de pixels à l'écran.
 
-  // D0 (GPIO16) : pull-down interne spécifique, bouton câblé vers 3V3 (voir en-tête)
-  pinMode(BTN_MANGER,  INPUT_PULLDOWN_16);
-  pinMode(BTN_DORMIR,  INPUT_PULLUP);
-  pinMode(BTN_TRAVAIL, INPUT_PULLUP);
+## Variables globales principales
 
-  pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);
+| Variable | Rôle |
+|----------|------|
+| `etatActuel` | État courant de Mr Larbin (idle / dort / mange / travaille) |
+| `faim`, `energie`, `travail` | Statistiques du personnage (0 à 100) |
+| `actionEnCours` | Vrai pendant une action temporaire (manger/travailler) qui doit se terminer toute seule après quelques secondes |
+| `dormirManuel` | Vrai si le sommeil a été déclenché par le bouton DORMIR (pour ne pas réveiller automatiquement Mr Larbin dans ce cas) |
+| `dernierAppuiBouton` | Sert à l'anti-rebond des boutons |
 
-  pinMode(TFT_BLK, OUTPUT);
-  digitalWrite(TFT_BLK, HIGH);  // allume le rétroéclairage
+## Pistes d'évolution possibles
 
-  SPI.begin();
+- Afficher les stats (faim/énergie/travail) en texte ou en barres sur l'écran
+- Ajouter un état "mort" si la faim ou l'énergie tombent à 0 trop longtemps
+- Sauvegarder les stats en mémoire flash (`EEPROM`/`LittleFS`) pour les garder après une coupure de courant
 
-  tft.initR(INITR_BLACKTAB);   // adaptez si votre écran a un tab différent (GREENTAB, REDTAB...)
-  tft.setRotation(0);          // 0 ou 2 selon l'orientation souhaitée (portrait 128x160)
-  tft.fillScreen(ST77XX_BLACK);
-
-  afficherEtat(etatActuel, true);
-}
-
-void loop() {
-  unsigned long maintenant = millis();
-
-  lireBoutons(maintenant);
-
-  // Décrément périodique des stats (sauf pendant une action temporaire)
-  if (!actionEnCours && maintenant - dernierTickStats >= INTERVALLE_STATS) {
-    dernierTickStats = maintenant;
-    if (etatActuel != ETAT_DORT) {
-      energie = max(0, energie - 2);
-    } else {
-      energie = min(100, energie + 5); // il récupère de l'énergie en dormant
-    }
-    faim = max(0, faim - 3);
-  }
-
-  // Fin d'une action temporaire (manger / travailler)
-  if (actionEnCours && maintenant - debutActionTemporaire >= (etatActuel == ETAT_MANGE ? DUREE_MANGE : DUREE_TRAVAIL)) {
-    actionEnCours = false;
-    etatActuel = ETAT_IDLE;
-  }
-
-  // Si plus d'énergie, il s'endort automatiquement
-  if (energie <= 0 && etatActuel != ETAT_DORT) {
-    etatActuel = ETAT_DORT;
-    actionEnCours = false;
-  }
-
-  // Si l'énergie est remontée à fond pendant le sommeil auto, on se réveille
-  if (etatActuel == ETAT_DORT && energie >= 100 && !dormirManuel) {
-    etatActuel = ETAT_IDLE;
-  }
-
-  afficherEtat(etatActuel, false);
-
-  delay(20);
-}
-
-void lireBoutons(unsigned long maintenant) {
-  if (maintenant - dernierAppuiBouton < DEBOUNCE) return;
-
-  // BTN_MANGER est câblé vers 3V3 (pull-down interne) -> actif à l'état HAUT,
-  // contrairement aux deux autres boutons (câblés vers GND, actifs à l'état BAS)
-  if (digitalRead(BTN_MANGER) == HIGH) {
-    dernierAppuiBouton = maintenant;
-    beep();
-    etatActuel = ETAT_MANGE;
-    actionEnCours = true;
-    debutActionTemporaire = maintenant;
-    faim = min(100, faim + 30);
-    dormirManuel = false;
-  }
-  else if (digitalRead(BTN_DORMIR) == LOW) {
-    dernierAppuiBouton = maintenant;
-    beep();
-    if (etatActuel == ETAT_DORT) {
-      // Réveil manuel
-      etatActuel = ETAT_IDLE;
-      dormirManuel = false;
-    } else {
-      etatActuel = ETAT_DORT;
-      actionEnCours = false;
-      dormirManuel = true;
-    }
-  }
-  else if (digitalRead(BTN_TRAVAIL) == LOW) {
-    dernierAppuiBouton = maintenant;
-    beep();
-    etatActuel = ETAT_TRAVAILLE;
-    actionEnCours = true;
-    debutActionTemporaire = maintenant;
-    travail = min(100, travail + 10);
-    dormirManuel = false;
-  }
-}
-
-// Petit bip non bloquant (utilise le timer matériel via tone(), donc ne
-// ralentit pas la boucle principale). Fonctionne avec un buzzer passif.
-// Si vous avez un buzzer ACTIF (2 pattes, pas de "+"/"-" marqué mais bip
-// tout seul dès qu'il est alimenté), remplacez le corps de cette fonction
-// par : digitalWrite(BUZZER_PIN, HIGH); delay(80); digitalWrite(BUZZER_PIN, LOW);
-void beep() {
-  tone(BUZZER_PIN, 2000, 80);  // 2000 Hz pendant 80 ms
-}
-
-void afficherEtat(EtatMrLarbin etat, bool forcer) {
-  if (etat == dernierEtatAffiche && !forcer) return; // évite de redessiner inutilement
-  dernierEtatAffiche = etat;
-
-  const uint16_t* image = img_idle;
-  switch (etat) {
-    case ETAT_IDLE:      image = img_idle;      break;
-    case ETAT_DORT:      image = img_dors;      break;
-    case ETAT_MANGE:     image = img_mange;     break;
-    case ETAT_TRAVAILLE: image = img_travaille; break;
-  }
-
-  tft.drawRGBBitmap(0, 0, image, IMG_WIDTH, IMG_HEIGHT);
-}
-
-PARTIE PORTAL BOX
+=========================================================
+                    PARTIE PORTAL BOX
+=========================================================
