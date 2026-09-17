@@ -102,3 +102,170 @@ Affiche à l'écran l'image correspondant à l'état donné (idle/dort/mange/tra
 - Sauvegarder les stats en mémoire flash (`EEPROM`/`LittleFS`) pour les garder après une coupure de courant
 
 ================== PARTIE PORTAL BOX ==================
+
+# WorkshopB2 — Portail Web Raspberry Pi 4
+
+Serveur web Flask pour Raspberry Pi 4 qui affiche une interface plein écran contrôlée par un bouton physique branché sur les broches GPIO : écran noir par défaut, bascule vers un GIF animé à l'appui du bouton (et inversement).
+
+## Fichiers du projet
+
+- `app.py` — le script principal (serveur Flask + gestion GPIO + page HTML/CSS/JS embarquée)
+- `requirements.txt` — dépendances Python (`flask`, `gpiozero`)
+- `workshopb2-portail.service` — service systemd pour le lancement automatique au démarrage
+- `static/portail.gif` — le GIF affiché à l'écran
+
+## Fonctionnement
+
+- **Affichage par défaut :** fond noir plein écran sur le navigateur du client (ex : téléphone connecté au même réseau que le Pi).
+- **Action du bouton :** un appui sur le bouton physique bascule l'état de l'application. La page passe du noir à l'affichage du GIF (et inversement au prochain appui).
+- **Mise à jour en temps réel :** le navigateur interroge le serveur en arrière-plan (polling AJAX via `fetch('/status')` toutes les 300 ms) pour mettre à jour l'affichage sans jamais recharger la page.
+- **Anti-cache GIF :** à chaque activation, l'URL du GIF reçoit un paramètre unique (`?t=Date.now()`) pour forcer le navigateur à rejouer l'animation depuis le début.
+
+> **Note :** une évolution future du projet est prévue avec un son (`portail_gun.mp3`) joué en complément du GIF. Le code actuel de `app.py` ne gère que le GIF ; le son n'est pas encore implémenté côté serveur.
+
+## Câblage final
+
+| Composant     | Pin Raspberry Pi 4        | Remarque |
+|---------------|----------------------------|----------|
+| Bouton Signal | GPIO 17 (broche BCM 17)   | configurable via `BOUTON_PIN` dans `app.py` |
+| Bouton GND    | GND                        | masse électrique |
+
+### Pourquoi ce câblage un peu particulier ?
+
+- **Pas de résistance externe** : la résistance de rappel au plus (pull-up) interne du Raspberry Pi est activée directement par le code (`pull_up=True`). Aucun composant ni résistance externe n'est nécessaire.
+- **Anti-rebond logiciel** : un délai de 50 ms (`BOUNCE_TIME`) est configuré pour éviter les déclenchements multiples sur un seul appui.
+
+## Structure du projet
+
+```text
+workshopb2_portail_pi/
+├── app.py                       # Script principal Flask + gestion GPIO
+├── requirements.txt             # Dépendances Python (flask, gpiozero)
+├── workshopb2-portail.service   # Service systemd pour le lancement automatique
+└── static/
+    └── portail.gif              # Le GIF à afficher
+```
+
+## Installation
+
+### 1. Installer les dépendances
+
+Sur les Raspberry Pi OS récents, l'utilisation d'un environnement virtuel est nécessaire (erreur "externally-managed-environment" sinon) :
+
+```bash
+sudo apt update
+sudo apt install python3-venv
+cd ~/workshopb2_portail_pi
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Une fois le venv créé, il suffit de refaire `source venv/bin/activate` aux prochaines sessions manuelles ; le service systemd (voir plus bas) s'en charge automatiquement au démarrage.
+
+### 2. Mettre le GIF en place
+
+Copie ton fichier dans `static/` :
+
+```
+static/portail.gif
+```
+
+Renomme-le exactement ainsi, ou modifie la constante `GIF_FILENAME` en haut de `app.py` si tu préfères un autre nom.
+
+### 3. Adapter le GPIO du bouton
+
+Dans `app.py` :
+
+```python
+BOUTON_PIN = 17  # broche BCM du bouton
+```
+
+Câblage : bouton entre cette broche et GND (pull-up géré par le code, voir section Câblage).
+
+### 4. Connecter le Pi au réseau (ex : hotspot du téléphone)
+
+Active le partage de connexion sur ton téléphone, puis sur le Pi :
+
+```bash
+sudo raspi-config
+# System Options -> Wireless LAN -> choisis le SSID de ton téléphone
+```
+
+Récupère l'IP du Pi sur ce réseau :
+
+```bash
+hostname -I
+```
+
+## Exécution
+
+Le serveur utilise le port réseau **80** (port HTTP standard), ce qui nécessite les privilèges administrateur sous Linux.
+
+```bash
+sudo venv/bin/python3 app.py
+```
+
+Le fichier possède aussi un shebang (`#!/usr/bin/env python3`), qui permet de le lancer directement une fois rendu exécutable :
+
+```bash
+chmod +x app.py
+sudo ./app.py
+```
+
+Sur le téléphone ou le PC connecté au même réseau, ouvre le navigateur à l'adresse IP du Raspberry Pi :
+
+```
+http://<IP_du_Pi>/
+```
+
+### Comportement attendu
+- Écran noir au chargement de la page.
+- 1er appui sur le bouton → le GIF s'affiche, sans recharger la page.
+- 2e appui → retour à l'écran noir.
+
+## Lancement automatique au démarrage (optionnel)
+
+Le fichier `workshopb2-portail.service` permet de lancer le serveur automatiquement au démarrage du Pi via systemd.
+
+```bash
+sudo cp workshopb2-portail.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable workshopb2-portail.service --now
+```
+
+> Adapte les champs `WorkingDirectory` et `ExecStart` du fichier `.service` si ton utilisateur n'est pas `pi`/`root` ou si le dossier du projet n'est pas installé dans `/home/<user>/workshopb2_portail_pi`.
+
+## Fonctions et routes du code (`app.py`)
+
+### `basculer()`
+Inverse la variable globale `afficher_gif` (`True`/`False`). Appelée automatiquement par `gpiozero` à chaque appui sur le bouton via `bouton.when_pressed`.
+
+### Route `/`
+Sert la page HTML/CSS/JS principale, générée directement en Python (pas de dossier `templates`).
+
+### Route `/status`
+Renvoie l'état actuel sous forme de JSON (`{"actif": true/false}`), interrogée par le navigateur toutes les 300 ms.
+
+### Route `/static/<fichier>`
+Sert les fichiers multimédias contenus dans le dossier `static` (ex : `portail.gif`).
+
+### Côté navigateur (HTML/CSS/JS embarqué dans `app.py`)
+- **CSS :** page configurée en plein écran (`100vw`/`100vh`), fond noir, sans marges, centrage Flexbox.
+- **JavaScript (polling) :** `setInterval` exécute une requête `fetch('/status')` toutes les 300 ms et met à jour l'affichage du GIF si l'état a changé.
+- **Gestion du cache GIF :** l'URL du GIF reçoit un paramètre unique (`?t=Date.now()`) à chaque activation pour forcer le rejeu de l'animation depuis le début.
+
+## Variables globales principales
+
+| Variable | Rôle |
+|----------|------|
+| `afficher_gif` | État courant de l'affichage (`True` = GIF visible, `False` = écran noir) |
+| `BOUTON_PIN` | Broche GPIO (BCM) utilisée par le bouton |
+| `BOUNCE_TIME` | Délai anti-rebond du bouton (en secondes) |
+| `GIF_FILENAME` | Nom du fichier GIF servi par le serveur |
+
+## Pistes d'évolution possibles
+
+- Implémenter le son (`portail_gun.mp3`) évoqué dans le comportement cible, en le jouant côté client au moment du retour à l'écran noir
+- Ajouter un endpoint pour changer le GIF ou le son sans modifier le code
+- Historiser les appuis (nombre d'activations, horodatage) pour du debug ou des statistiques

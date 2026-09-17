@@ -1,0 +1,26 @@
+# Service systemd pour lancer automatiquement le serveur au démarrage du Pi.
+#
+# Installation :
+#   sudo cp workshopb2-portail.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable workshopb2-portail.service --now
+#   sudo systemctl start workshopb2-portail.service
+#
+# Adapte WorkingDirectory et ExecStart au chemin réel où tu as copié le dossier.
+# ExecStart pointe vers le python
+
+[Unit]
+Description=WorkshopB2 Portail - Serveur web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/lon/workshopb2_portail_pi
+ExecStart=/usr/bin/python3 /home/lon/workshopb2_portail_pi/app.py
+Restart=on-failure
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target
+
