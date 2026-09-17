@@ -1,8 +1,6 @@
 # WORKSHOP-B2
 
-==================
-PARTIE MR LARBIN
-==================
+================== PARTIE MR LARBIN ==================
 
 # Mr Larbin — Tamagotchi ESP8266
 
@@ -103,6 +101,4 @@ Affiche à l'écran l'image correspondant à l'état donné (idle/dort/mange/tra
 - Ajouter un état "mort" si la faim ou l'énergie tombent à 0 trop longtemps
 - Sauvegarder les stats en mémoire flash (`EEPROM`/`LittleFS`) pour les garder après une coupure de courant
 
-==================
-PARTIE PORTAL BOX
-==================
+================== PARTIE PORTAL BOX ==================
